@@ -1,0 +1,86 @@
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage[center]{caption}
+% If you're new to LaTeX, here's some short tutorials:
+% https://www.overleaf.com/learn/latex/Learn_LaTeX_in_30_minutes
+% https://en.wikibooks.org/wiki/LaTeX/Basics
+
+% Formatting
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage[titletoc,title]{appendix}
+
+% Math
+% https://www.overleaf.com/learn/latex/Mathematical_expressions
+% https://en.wikibooks.org/wiki/LaTeX/Mathematics
+\usepackage{amsmath,amsfonts,amssymb,mathtools}
+\usepackage{bm}
+\usepackage{siunitx}
+
+% Images
+% https://www.overleaf.com/learn/latex/Inserting_Images
+% https://en.wikibooks.org/wiki/LaTeX/Floats,_Figures_and_Captions
+\usepackage{graphicx,float}
+
+% Tables
+% https://www.overleaf.com/learn/latex/Tables
+% https://en.wikibooks.org/wiki/LaTeX/Tables
+
+% Algorithms
+% https://www.overleaf.com/learn/latex/algorithms
+% https://en.wikibooks.org/wiki/LaTeX/Algorithms
+\usepackage[ruled,vlined]{algorithm2e}
+\usepackage{algorithmic}
+
+% Code syntax highlighting
+% https://www.overleaf.com/learn/latex/Code_Highlighting_with_minted
+\usepackage{minted}
+\usemintedstyle{borland}
+
+% References
+% https://www.overleaf.com/learn/latex/Bibliography_management_in_LaTeX
+% https://en.wikibooks.org/wiki/LaTeX/Bibliography_Management
+\usepackage{biblatex}
+\addbibresource{references.bib}
+
+\DeclareMathOperator{\taninv}{tan\,inverse}
+
+% Title content
+\title{ENPM 673 Project 4}
+\author{Arjun Srinivasan Ambalam, Praveen Menaka Sekar, Arun Kumar Dhandayuthabani}
+\begin{document}
+
+\maketitle
+
+% Introduction and Overview
+\section{Inverse Compositional Algorithm}
+There is a huge computational cost in re-evaluating the Hessian in every iteration of the Lucas-Kanade algorithm proposed originally.To reduce this cost,there is an updated process named Inverse Compositional Algorithm.In this method,various  parameters are updated after a couple of iterations. The Hessian is considered to be relatively constant and pre-computed.The goal of the inverse compositional algorithm is the same as the Lucas-Kanade algorithm; i.e. to minimize:
+
+ the cost of the inverse compositional algorithm is
+
+ iteration rather than
+
+for the Lucas-Kanade algorithm, a substantial saving.
+
+The inverse compositional algorithm iteratively applies Equations (12) and (13)
+
+
+\section{Steps for Inverse Compositional KLT}
+
+\subsection{Pre-Computation}
+\begin{enumerate}
+    \item Evaluate the gradient 5T of the template T(x)
+    \item Evaluate the Jacobian ∂W/∂p at (x; 0).
+    \item Compute the Steepest descent images 5T(∂W/∂p)
+    \item Compute the Hessian matrix
+\end{enumerate}
+\subsection{Iterative Steps}
+\begin{enumerate}
+    \item  Warp I with W(x; p) to compute I(W(x; p))
+    \item  Compute the error in the image I(W(x; p)) − T(x)
+    \item  Compute ∆p
+    \item Update the warp W (x; p) ← W (x; p) ◦ W (x; ∆p)power(-1) until k∆pk ≤ e
+\end{enumerate}
+
+
+\end{document}
