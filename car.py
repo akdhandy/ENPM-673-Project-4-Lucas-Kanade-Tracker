@@ -1,227 +1,136 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Apr 20 11:23:43 2020
-
-@author: Arun
-"""
-
-import numpy as np
-np.set_printoptions(threshold=np.inf)
 import cv2
+import numpy as np
 import glob
 
+def jacobian(x_shape, y_shape):
+    x = np.array(range(x_shape))
+    y = np.array(range(y_shape))
+    x, y = np.meshgrid(x, y)
+    ones = np.ones((y_shape, x_shape))
+    zeros = np.zeros((y_shape, x_shape))
+    row1 = np.stack((x, zeros, y, zeros, ones, zeros), axis=2)
+    row2 = np.stack((zeros, x, zeros, y, zeros, ones), axis=2)
+    jacob = np.stack((row1, row2), axis=2)
+    return jacob
 
-
-
-def template_create(gray_img,points):
-    ### crop = img[y1:y2, x1:x2]
-    cropped = gray_img[points[0][1]:points[1][1], points[0][0]:points[1][0]]
-    return cropped
-
-def warp_affine(frame,M):
-
-    warped = cv2.warpAffine(frame,M,(frame.shape[0],frame.shape[1]))
-
-    return warped,M
-
-def warp_paramters(P,points):
-
-    p1 = P[0]
-    p2 = P[1]
-    p3 = P[2]
-    p4 = P[3]
-    p5 = P[4]
-    p6 = P[5]
-
-    x_start = points[0][0]
-    x_end = points[1][0]
-    y_start = points[0][1]
-    y_end = points[1][1]
-
-    my_x = np.asarray(list(range(x_start,x_end)))
-    my_y = np.asarray(list(range(y_start,y_end)))
-
-    mesh_x,mesh_y = np.meshgrid(my_x,my_y,indexing='ij')
-
-    mesh_x = mesh_x.flatten()   ## x
-    mesh_y = mesh_y.flatten()   ## y
-
-    p1_x = np.multiply(1+p1,mesh_y)
-    p3_y = np.multiply(p3,mesh_x)
-    p5_1 = np.multiply(p5,np.ones(mesh_x.shape[0],))
-    p2_x  = np.multiply(p2,mesh_y)
-    p4_y  = np.multiply(1+p4,mesh_x)
-    p6_1 = np.multiply(p6,np.ones(mesh_y.shape[0],))
-
-    x = p1_x+p3_y+p5_1
-    y = p2_x+p4_y+p6_1
-
-    w_new = np.array([x,y]).T
-
-    warp_mat = []
-
-    return w_new
-
-def warped_image(warp_mat,frame,points):
-
-    x_start = points[0][0]
-    x_end = points[1][0]
-    y_start = points[0][1]
-    y_end = points[1][1]
-
-    I_gray = []
-
-    for iter in warp_mat:
-        I_gray.append(frame[int(iter[0]),int(iter[1])])
-
-    I_gray_image = np.reshape(np.asarray(I_gray),[y_end-y_start,x_end-x_start], order='F' )
-
-    return I_gray_image
-
-# remove the template from the warped image to obtain the error
+def adjust_gamma(image, gamma=1.0):
     
-def error(template,I):
-    error = template-I
-    return error
+    invGamma = 1.0 / gamma
+    table = np.array([((i / 255.0) ** invGamma) * 255
+        for i in np.arange(0, 256)]).astype("uint8")
+ 
+    return cv2.LUT(image, table)
 
-def image_gradients(img):
+def InverseLK(img, tmp, parameters, rect, p):
+    # Initialization
+    rows, cols = tmp.shape
+    # print("rows", rows)
+    # print("columns", cols)
 
-    gradient_sobelx = (cv2.Sobel(img,cv2.CV_8U,1,0,ksize=5))
-    gradient_sobely = (cv2.Sobel(img,cv2.CV_8U,0,1,ksize=5))
+    lr, iteration = parameters
+    # Calculate gradient of template
+    grad_x = cv2.Sobel(tmp, cv2.CV_64F, 1, 0, ksize=5)
+    grad_y = cv2.Sobel(tmp, cv2.CV_64F, 0, 1, ksize=5)
 
-    return gradient_sobelx,gradient_sobely
-
-# obtian the Jacobian matrix
-def jacobian(x,y):
-    dw_dp = np.array([[x,0,y,0,1,0],[0,x,0,y,0,1]])
-    return dw_dp
-
-def iterative(gray1,points,T,P,count):
-
-    iter = 0
-
-    norm = 10
-
-
-    steepest_descent = np.zeros([T.shape[0]*T.shape[1],6])
-
-    hessian = np.zeros([6,6])
+    # Calculate Jacobian
+    jacob = jacobian(cols, rows)
+    p=np.zeros(6)
 
 
+    # Set gradient of a pixel into 1 by 2 vector
+    grad = np.stack((grad_x, grad_y), axis=2)
+    grad = np.expand_dims((grad), axis=2)
+    steepest_descents = np.matmul(grad, jacob)
+    steepest_descents_trans = np.transpose(steepest_descents, (0, 1, 3, 2))
 
-    while(norm >= 0.05):# and norm <= 0.00):
+    # Compute Hessian matrix
+    hessian_matrix = np.matmul(steepest_descents_trans, steepest_descents).sum((0, 1))
+    for _ in range(iteration):
+        # Calculate warp image
+        warp_mat = np.array([[1 + p[0], p[2], p[4]], [p[1], 1 + p[3], p[5]]])
+        warp_img = cv2.warpAffine(img, warp_mat, (0, 0))
+        warp_img = warp_img[rect[0][1]:rect[1][1], rect[0][0]:rect[1][0]]
+        # Compute the error term
+        error = tmp.astype(float) - warp_img.astype(float)
+        error = error.reshape((rows, cols, 1, 1))
+        update = (steepest_descents_trans * error).sum((0, 1))
+        # print("uodate", update)
+        d_p = np.matmul(np.linalg.pinv(hessian_matrix), update).reshape((-1))
 
-        warp_params =  warp_paramters(P,points)
+        # Update p
+        d_p_deno = (1 + d_p[0]) * (1 + d_p[3]) - d_p[1] * d_p[2]
+        d_p_0 = (-d_p[0] - d_p[0] * d_p[3] + d_p[1] * d_p[2]) / d_p_deno
+        d_p_1 = (-d_p[1]) / d_p_deno
+        d_p_2 = (-d_p[2]) / d_p_deno
+        d_p_3 = (-d_p[3] - d_p[0] * d_p[3] + d_p[1] * d_p[2]) / d_p_deno
+        d_p_4 = (-d_p[4] - d_p[3] * d_p[4] + d_p[2] * d_p[5]) / d_p_deno
+        d_p_5 = (-d_p[5] - d_p[0] * d_p[5] + d_p[1] * d_p[4]) / d_p_deno
 
-        warped_im = warped_image(warp_params,gray1,points)
-
-        # cv2.imshow('warped',warped_im)
-
-        error_image = error(T,warped_im)
-
-        error_image_reshaped = np.reshape(error_image,(error_image.shape[0]*error_image.shape[1],1))
-
-        grad_x , grad_y = image_gradients(gray1)
-
-        ### obtaining the gradients of cropped images in x and y
-        warp_grad_x  = warped_image(warp_params,grad_x,points)
-        warp_grad_y  = warped_image(warp_params,grad_y,points)
-
-
-        grad_x_flatten = warp_grad_x.flatten()      ##I_x
-        grad_y_flatten = warp_grad_y.flatten()      ##I_y
-
-
-        my_x = np.asarray(list(range(0,warp_grad_x.shape[1])))
-        my_y = np.asarray(list(range(0,warp_grad_x.shape[0])))
-
-        mesh_x,mesh_y = np.meshgrid(my_x,my_y,indexing='ij')
-
-        mesh_x = mesh_x.flatten()   ## x
-        mesh_y = mesh_y.flatten()   ## y
-
-        ix_x = np.multiply(grad_x_flatten.T,mesh_x.T)
-        iy_x = np.multiply(grad_y_flatten.T,mesh_x.T)
-        ix_y = np.multiply(grad_x_flatten.T,mesh_y.T)
-        iy_y = np.multiply(grad_y_flatten.T,mesh_y.T)
-        ix = grad_x_flatten.T
-        iy = grad_y_flatten.T
-
-        steepest_descent = steepest_descent + np.array([ix_x,iy_x,ix_y,iy_y,ix,iy]).T
-
-        hessian =  hessian + np.dot(steepest_descent.T,steepest_descent)
-
-        ### applying the inverse hessian to the "hessian of steepest gradient descent"
-        delta_p =  np.matmul(np.linalg.pinv(hessian), np.matmul(steepest_descent.T,error_image_reshaped))
-
-        norm = np.linalg.norm(delta_p)
-
-        #
-        # # # ## updating the P
-        if iter >3 and count > 3:
-            gamma = np.diag([0.5, 0.5, 0.1, 0.1, -0.0005, 0.0005])
-
-        else:
-            gamma = np.diag([0.5,0.5,0.1,0.1,-0.001,0.001])
-
-        P = P + np.dot(gamma, delta_p)
-
-        iter+=1
-    return P,iter,warped_im
-
-img1 = cv2.imread('car/frame0020.jpg')  ### image at time step 1
-
-gray1 = cv2.cvtColor(img1,cv2.COLOR_BGR2GRAY)
-
-# 290:360, 250:288
-points = [[120,90],[340,280]]
-
-P = np.array([[0.001],[0.001],[0.0001],[-0.0001],[1],[1]])
-template_image = template_create(gray1,points)
-
-count = 0
-all_frames = []
-######## obtain the image
-filenames = [img for img in glob.glob("car/*.jpg")]
-filenames.sort()
-for img in filenames:
-    n = cv2.imread(img)
-    # obtain the gray scale
-    count+=1
-
-    gray1 = cv2.cvtColor(n,cv2.COLOR_BGR2GRAY)
-    # cv2.imshow('vid',gray1)
-    # cv2.waitKey(0)
-    print(gray1.shape)
-
-    # print(asdc)
-    P,iter, warped_img= iterative(gray1,points,template_image,P,count)
-
-    print(P,count,iter)
-    p1,p2,p3,p4,p5,p6 = P[0,0], P[1,0], P[2,0], P[3,0], P[4,0], P[5,0]
-
-    W = np.matrix([[1+p1, p3, p5],[p2, 1+p4, p6]])
-
-    # print(warped_img.shape[0],warped_img.shape[1])
-
-    new_mat_1 = np.array([[points[0][0]],[points[0][1]],[1]])#.astype(int)
-    new_mat_2 = np.array([[points[1][0]],[points[1][1]],[1]])#.astype(int)
-
-    wx1 = np.matmul(W,new_mat_1).astype(int)
-    wx2 = np.matmul(W,new_mat_2).astype(int)
-
-    cv2.rectangle(n,(wx1[0],wx1[1]),(wx2[0],wx2[1]),color=255)
-    all_frames.append(n)
-
-    cv2.imshow('gray1',n)
-    cv2.waitKey(0)
+        p[0] += lr * (d_p_0 + p[0] * d_p_0 + p[2] * d_p_1)
+        p[1] += lr * (d_p_1 + p[1] * d_p_0 + p[3] * d_p_1)
+        p[2] += lr * (d_p_2 + p[0] * d_p_2 + p[2] * d_p_3)
+        p[3] += lr * (d_p_3 + p[1] * d_p_2 + p[3] * d_p_3)
+        p[4] += lr * (d_p_4 + p[0] * d_p_4 + p[2] * d_p_5)
+        p[5] += lr * (d_p_5 + p[1] * d_p_4 + p[3] * d_p_5)
+    cv2.imshow('Gammacorrect_img', warp_img)
+    k=cv2.waitKey(1)
+    return p
 
 
-print('done video')
+ROIs={0:(73,53,104,89),390:(225 , 76 , 64 , 51),280:(190   , 63  ,68 , 55),480:(202,70,68,52),595:(228  ,61 , 85 , 65)
+  ,170:(110,66 ,81 ,65),209:(139    ,67  ,74  ,55)} # Dataset:(x,y,w,h)
+filepath="/home/arjun/Desktop/LKT/Car4/img/0001.jpg"
+frame=cv2.imread(filepath)
+x,y,w,h=ROIs[0]
+color_template = frame[y:y+h,x:x+w]
+rect=(x,y,w,h)
+refPt=[[x, y], [x+w, y+h]]
+template = cv2.cvtColor(color_template, cv2.COLOR_BGR2GRAY)
+T = np.float32(template)/255
+p=np.zeros(6)
+images=[]
+for img in glob.glob((r"/home/arjun/Desktop/LKT/Car4/img/*.jpg")):
+                images.append(img)
+images.sort()
+images=images[1:]
+parameters = [2, 200]
 
-source = cv2.VideoWriter_fourcc(*'XVID')
-out = cv2.VideoWriter('output_car.avi', source, 5.0, (720, 480))
-for iter1 in all_frames:
-    out.write(iter1)
-    cv2.waitKey(15)
-    out.release()
+count=2
+for img in images:
+        if(count==170 or count ==209 or count==280 
+            or count==390 or count ==480 or count ==595) :
+            frame=cv2.imread(img)
+            if count ==170 or count ==209:
+                        frame = adjust_gamma(frame,gamma=1.5)
+            if count ==390 or count ==480 or count ==595 :
+                         parameters = [2.5, 300]
+            x,y,w,h=ROIs[count]
+            rect=(x,y,w,h)
+            color_template = frame[y:y+h,x:x+w]
+            template = cv2.cvtColor(color_template, cv2.COLOR_BGR2GRAY)
+            T = np.float32(template)/255
+            refPt=[[x, y], [x+w, y+h]]
+            p=np.zeros(6)        
+        color_frame=cv2.imread(img)
+        if 183 <count <230:
+                        color_frame = adjust_gamma(color_frame,gamma=1.5)
+        gray_frame=cv2.cvtColor(color_frame, cv2.COLOR_BGR2GRAY)
+        I = np.float32(gray_frame)/255
+        p = InverseLK(I, T, parameters, refPt, p)
+        warp_mat = np.array([[1 + p[0], p[2], p[4]], [p[1], 1 + p[3], p[5]]])
+        warp_mat = cv2.invertAffineTransform(warp_mat)
+        rectangle=[[rect[0],rect[1]],[rect[0]+w,rect[1]],[rect[0]+w,rect[1]+h],[rect[0],rect[1]+h]]
+        box=np.array(rectangle)
+        box=box.T
+        box=np.vstack((box,np.ones((1,4))))
+        pts=np.dot(warp_mat,box)
+        pts=pts.T
+        pts=pts.astype(np.int32)
+        print(count)
+
+        count+=1
+        cv2.polylines(color_frame, [pts], True, (0,255,255), 2)
+        cv2.imshow('Tracked Image',color_frame)
+        cv2.waitKey(1)
+        
+
