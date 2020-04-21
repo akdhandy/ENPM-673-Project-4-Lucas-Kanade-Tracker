@@ -70,7 +70,7 @@ def InverseLK(img, tmp, parameters, rect, p):
     k=cv2.waitKey(1)
     return p
 ROIs={0:(160,83,56,65)}
-filepath="DragonBaby/img/0001.jpg"
+filepath="/home/arjun/Desktop/LKT/DragonBaby/DragonBaby/img/0001.jpg"
 frame=cv2.imread(filepath)
 x,y,w,h=ROIs[0]
 color_template = frame[y:y+h,x:x+w]
@@ -80,7 +80,7 @@ template = cv2.cvtColor(color_template, cv2.COLOR_BGR2GRAY)
 T = np.float32(template)/255
 p=np.zeros(6)
 images=[]
-for img in glob.glob((r"DragonBaby/img/*.jpg")):
+for img in glob.glob((r"/home/arjun/Desktop/LKT/DragonBaby/DragonBaby/img/*.jpg")):
                 images.append(img)
 images.sort()
 images=images[1:]
